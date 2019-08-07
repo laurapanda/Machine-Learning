@@ -1,0 +1,777 @@
+"""
+Machine Learning Assignment
+
+Linear Modeling
+
+Predicting the birth weight of a newborn baby
+
+Team 6: Alan Job Alvarado, Laura Schweigert, Saner Jain, Shitong Bai
+
+Last edited: 03/13/19
+
+"""
+
+###############################################################################
+## Importin Libraries and Packages
+###############################################################################
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+import statsmodels.formula.api as smf # regression modeling
+import statsmodels.api as sm
+import numpy as np
+from sklearn.model_selection import cross_val_score
+
+###############################################################################
+## Importing Data
+###############################################################################
+
+file = 'birthweight_feature_set-1.xlsx'
+
+birthweight = pd.read_excel(file)
+
+
+###############################################################################
+## EDA
+###############################################################################
+
+#Checking data quality
+
+# Information about each variable (number of non-null observations, and type)
+print(birthweight.info())
+
+# Descriptive statistics
+print(birthweight.describe().round(2))
+
+# Creating new data set without the missing values to visually explore the 
+# variables
+birthweight_drop = birthweight.dropna()
+
+# Looking at histograms
+plt.figure(figsize=(26, 24))
+for i, col in enumerate(list(birthweight_drop.columns)[0:]):
+    plt.subplot(8, 5, i + 1)
+    plt.hist(birthweight_drop[col])
+    plt.title(col)
+
+
+###############################################################################
+# Imputing Missing values with median
+###############################################################################
+
+
+# Checking if there are missing values
+print(
+      birthweight
+      .isnull()
+      .sum()
+      )
+
+"""
+Numver of missing values:
+meduc     3
+npvis     3
+feduc     7
+"""
+
+# flagging missing values
+
+for col in birthweight:
+
+    """ Create columns that are 0s if a value was not missing and 1 if
+    a value is missing. """
+    
+    if birthweight[col].isnull().any():
+        birthweight['m_'+col] = birthweight[col].isnull().astype(int)
+
+# imputing missing values with the median
+npvis_median = birthweight['npvis'].median()
+birthweight['npvis'] = birthweight['npvis'].fillna(npvis_median)
+
+meduc_median = birthweight['meduc'].median()
+birthweight['meduc'] = birthweight['meduc'].fillna(meduc_median)
+
+feduc_median = birthweight['feduc'].median()
+birthweight['feduc'] = birthweight['feduc'].fillna(meduc_median)
+
+"""If we would have dropped the observations with missing values we would have missed the 
+obeservation of the parents that are both very old, the mother drinks and smokes a lot
+and the baby was born with an extremely low birth wight of around 600g. """
+
+# Checking the overall dataset to see if there is any remaining missing value
+print(
+      birthweight
+      .isnull()
+      .any()
+      .any()
+      )
+
+
+###############################################################################
+# Exploring Outliers - defining outliers based on scientific research
+###############################################################################
+
+
+#############
+# Low birthweight
+
+# Setting the threshold for a low birthweight at 2500 grams
+
+# https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5710991/
+
+"""We set this value to visually observe the behavior of all other 
+   variables.In the further analysis the observations below or equal to a 
+   birthweight of 2500 grams are considered as low birthweight.
+   """
+   
+bwght_lo = 2500
+
+#############
+# Education
+
+""" 
+   We set the threshold for education (mother and father) at 14 years. 
+   People usually graduate from high school after 13 or 14 years of 
+   education. If their education took longer, it is most likely that 
+   they're pursuing and academic education (e.g. Bachelor's and Master's)
+   which we considered as higher education. We flagged the observations of 
+   someone with lower education.
+   """
+
+# Ploting the interception   
+plt.figure(figsize=(8,6))
+
+plt.scatter(birthweight['meduc'], birthweight['bwght'], s=30, c = 'red',
+            marker = 'o', alpha=0.5, label = '')
+
+plt.axvline(14)
+
+plt.axhline(2500)
+
+plt.xlabel('Mother years of education')
+
+plt.ylabel('Birthweight')
+
+plt.show()
+
+meduc_lo = 14
+feduc_lo = 14
+
+##############
+# Months of prenatal care began 
+plt.figure(figsize=(8,6))
+
+plt.scatter(birthweight['monpre'], birthweight['bwght'], s=30, c = 'red',
+            marker = 'o', alpha=0.5, label = '')
+
+plt.axhline(y=2500)
+
+plt.axvline(x=4)
+
+plt.xlabel('Month of prenatal care began ')
+
+plt.ylabel('Birthweight')
+
+plt.show()
+
+""" 
+   Our research showed that a mother should begin with prenatal care after 
+   latest 3 month into pregnancy. We flagged the observations which the 
+   mothers started in their 4th month of pregnancy.
+   """
+   
+monpre_hi = 4
+
+#############
+# Total number of prenatal visits
+
+"The ressources claimed that mothers should have at least 8 prenatal visits."
+
+# https://www.jwatch.org/fw112231/2016/11/08/
+# who-doubles-minimum-number-recommended-prenatal-care
+
+# Ploting the interception
+plt.figure(figsize=(8,6))
+
+plt.scatter(birthweight['npvis'], birthweight['bwght'], s=30, c = 'red', 
+            marker = 'o', alpha=0.5, label = '')
+
+plt.axvline(8)
+
+plt.axvline(10)
+
+plt.axhline(2500)
+
+plt.xlabel('Number of prenatal visits')
+
+plt.ylabel('Birthweight')
+
+plt.show()
+
+"""
+   We challenged the research by observing a trend of low birthweights for
+   less or equal to 10 prenatal visit
+   """
+   
+npvis_lo = 10
+
+#############
+# Age of parents
+
+""" 
+   As a result of our research we found that women over 35 years old have 
+   a higher risk of giving birth to a baby with low birthweight.
+   """
+   
+# https://www.stanfordchildrens.org/en/topic/
+# default?id=pregnancy-over-age-30-90-P02481
+
+# Mother
+   
+# Ploting the interception   
+plt.figure(figsize=(8,6))
+
+plt.scatter(birthweight['mage'], birthweight['bwght'], s=30, c = 'red',
+            marker = 'o', alpha=0.5, label = '')
+
+plt.axvline(54)
+
+plt.axvline(35)
+
+plt.axhline(2500)
+
+plt.xlabel('Mother Age')
+
+plt.ylabel('Birthweight')
+
+plt.show()
+
+"""
+    We challenged the research by observing a trend of low birthweights for 
+    mothers who are 54 years or older.It is possible that there is not 
+    enough research for older mothers, because women usually have babies 
+    when they are between 25 and 35 years old
+    """
+    
+mage_hi = 54
+
+# Father
+
+""" 
+    We found out that fathers of 45 years or older are at a higher risk of 
+    giving birth to a baby with a low birthweight.
+   """
+   
+# http://time.com/5438882/paternal-age-health-problems/
+
+# Ploting the interception  
+plt.figure(figsize=(8,6))
+
+plt.scatter(birthweight['fage'], birthweight['bwght'], s=30, c = 'red', 
+            marker = 'o', alpha=0.5, label = '')
+
+plt.axvline(45)
+
+plt.axvline(50)
+
+plt.axhline(2500)
+
+plt.xlabel('Father Age')
+
+plt.ylabel('Birthweight')
+
+plt.show()
+
+""" 
+    We challenged the research because the variance of birthweights between 
+    40 and 50 is very high, so we decided to set the threshold at 50.
+   """
+   
+fage_hi = 50
+
+################
+# Average cigarettes per day
+
+# Ploting the interception
+plt.figure(figsize=(8,6))
+
+plt.scatter(birthweight['cigs'], birthweight['bwght'], s=30, c = 'red', 
+            marker = 'o', alpha=0.5, label = '')
+
+plt.axvline(13)
+
+plt.axhline(2500)
+
+plt.xlabel('Cigarettes per Day')
+
+plt.ylabel('Birthweight')
+
+plt.show()
+
+"""
+    We challenged common sense that you should not smoke at all during the 
+    pregnangy to understand if there is a specific number of cigs that 
+    influences low birthweight. In the scatter plot we saw that mothers 
+    that were smoking 13 cigarettes per day or more were at a higher risk 
+    of having a baby with low birthweight.
+    """
+
+cigs_hi = 13
+
+#############
+# Average drinks per week
+
+# Ploting the interception
+plt.figure(figsize=(8,6))
+
+plt.scatter(birthweight['drink'], birthweight['bwght'], s=30, c = 'red', 
+            marker = 'o', alpha=0.5, label = '')
+
+plt.axvline(5)
+
+plt.axhline(2500)
+
+plt.xlabel('Drinks per Week')
+
+plt.ylabel('Birthweight')
+
+plt.show()
+
+"""
+    We challanged common sense to understand if there is a specific number 
+    of drinks. In the scatter plot we can see that there is a clear 
+    realtionship between the number of drinks per week and the birthweight.
+    We set the threshold at 5, because that is where we started to see low 
+    birthweights.
+    """
+    
+drink_hi = 5
+
+
+###############################################################################
+# Flagging Outliers
+###############################################################################
+
+
+# Education
+birthweight['out_feduc'] = 0
+
+for val in enumerate(birthweight.loc[ : , 'feduc']):
+    if val[1] <= feduc_lo:
+        birthweight.loc[val[0], 'out_feduc'] = 1
+
+birthweight['out_meduc'] = 0
+
+for val in enumerate(birthweight.loc[ : , 'meduc']):
+    if val[1] <= meduc_lo:
+        birthweight.loc[val[0], 'out_meduc'] = 1
+
+# Month of prenatal care began
+        birthweight['out_monpre'] = 0
+
+for val in enumerate(birthweight.loc[ : , 'monpre']):
+    if val[1] >= monpre_hi:
+        birthweight.loc[val[0], 'out_monpre'] = 1
+
+# total number of prenatal visits        
+birthweight['out_npvis'] = 0
+
+for val in enumerate(birthweight.loc[ : , 'npvis']):
+    if val[1] <= npvis_lo:
+        birthweight.loc[val[0], 'out_npvis'] = 1
+
+# Age of parents
+birthweight['out_mage'] = 0
+
+for val in enumerate(birthweight.loc[ : , 'mage']):
+    if val[1] >= mage_hi:
+        birthweight.loc[val[0], 'out_mage'] = 1
+       
+birthweight['out_fage'] = 0
+
+for val in enumerate(birthweight.loc[ : , 'fage']):
+    if val[1] >= fage_hi:
+        birthweight.loc[val[0], 'out_fage'] = 1
+
+# Cigarettes per day
+birthweight['out_cigs'] = 0
+
+for val in enumerate(birthweight.loc[ : , 'cigs']):
+    if val[1] >= cigs_hi:
+        birthweight.loc[val[0], 'out_cigs'] = 1
+
+# Drinks per week
+birthweight['out_drink'] = 0
+
+for val in enumerate(birthweight.loc[ : , 'drink']):
+    if val[1] >= drink_hi:
+        birthweight.loc[val[0], 'out_drink'] = 1
+
+# Mother with a high usage of any kind of drug (observation is outlier for 
+# drinks or cigs)
+        
+"""
+    We created a new variable that is equal to 1 if the observation is an 
+    outlier for drinks and cigarettes. This is a way to identify mothers 
+    that created a high health risk to their babies, because they not only 
+    smoked cigarettes at a high amount but also drank a lot to let their 
+    babies have low birthweight.
+    """
+
+birthweight['out_drug'] = birthweight['out_cigs'] + birthweight['out_drink']
+
+birthweight["out_drug"] = birthweight["out_drug"].replace(1, 0)
+
+birthweight["out_drug"] = birthweight["out_drug"].replace(2, 1)
+
+birthweight['out_drug'].value_counts() # we have enough values (1/4 of the 
+# observations)
+
+###############################################################################
+# Correlation Analysis
+###############################################################################
+
+df_corr = birthweight.corr().round(2)
+
+print(df_corr['bwght'].sort_values())
+
+# Correlation Matrix
+
+# Using palplot to view a color scheme
+sns.palplot(sns.color_palette('coolwarm', 12))
+
+fig, ax = plt.subplots(figsize=(15, 15))
+
+df_corr2 = df_corr.iloc[0:18, 0:18]
+
+sns.heatmap(df_corr2,
+            cmap = 'coolwarm',
+            square=True,
+            annot=True,
+            linecolor = 'black',
+            linewidths=0.5)
+
+plt.show()
+
+""" 
+    We are specifically looking for strong correlation with bwght. 
+    The variables with the strongest relationship to bwght are:
+    drink        -0.74
+    out_drug     -0.65
+    cigs         -0.57
+    out_mage     -0.51
+    out_drink    -0.51
+    out_cigs     -0.50
+    mage         -0.46
+    fage         -0.40
+    out_fage     -0.39.
+    They all have a negative correlation with bwght. If their value increases, the 
+    birthweight decreases.
+"""
+
+
+###############################################################################
+# OLS and searching for significance
+###############################################################################
+
+
+#############
+# Stats model exploration
+
+# Full model with all variables
+"""
+    We don't use omaps and fmaps because they are measured after birth and have
+    no impact on the birthweight.
+ """
+
+lm_full = smf.ols(formula = """bwght ~
+                  birthweight['mage'] +
+                  birthweight['meduc'] +
+                  birthweight['monpre'] +
+                  birthweight['npvis'] +
+                  birthweight['fage'] +
+                  birthweight['feduc'] +
+                  birthweight['cigs'] +
+                  birthweight['drink'] +
+                  birthweight['male'] +
+                  birthweight['mwhte'] +
+                  birthweight['mblck'] +
+                  birthweight['moth'] +
+                  birthweight['fwhte'] +
+                  birthweight['fblck'] +
+                  birthweight['foth'] +
+                  birthweight['out_feduc'] +
+                  birthweight['out_meduc'] +
+                  birthweight['out_monpre'] +
+                  birthweight['out_npvis'] +
+                  birthweight['out_mage'] +
+                  birthweight['out_fage'] +
+                  birthweight['out_cigs'] +
+                  birthweight['out_drink'] +
+                  birthweight['out_drug']
+                  """,
+                  data = birthweight)
+
+# Fitting Results
+results = lm_full.fit()
+
+# Printing Summary Statistics
+print(results.summary())
+
+
+# What variables should we use in our model? which are the most significant 
+# variables?
+
+# Using stepwise regression
+
+# Source: https://datascience.stackexchange.com/questions/24405/
+# how-to-do-stepwise-regression-using-sklearn/24447#24447
+
+X = birthweight.drop(['bwght'], axis = 1)
+
+y = birthweight.loc[:, 'bwght']
+
+def stepwise_selection(X, y, 
+                       initial_list = [], 
+                       threshold_in=0.01, 
+                       threshold_out=0.05, 
+                       verbose=True):
+    
+    """ Perform a forward-backward feature selection 
+    based on p-value from statsmodels.api.OLS
+    Arguments:
+        X - pandas.DataFrame with candidate features
+        y - list-like with the target
+        initial_list - list of features to start with (column names of X)
+        threshold_in - include a feature if its p-value < threshold_in
+        threshold_out - exclude a feature if its p-value > threshold_out
+        verbose - whether to print the sequence of inclusions and exclusions
+    Returns: list of selected features 
+    """
+    
+    included = list(initial_list)
+    
+    while True:
+        changed=False
+        
+        # forward step        
+        excluded = list(set(X.columns)-set(included))
+        new_pval = pd.Series(index=excluded)
+        for new_column in excluded:
+            model = sm.OLS(y, sm.add_constant(pd.DataFrame(X[included + 
+                           [new_column]]))).fit()
+            new_pval[new_column] = model.pvalues[new_column]
+        best_pval = new_pval.min()
+        if best_pval < threshold_in:
+            best_feature = new_pval.argmin()
+            included.append(best_feature)
+            changed=True
+            if verbose:
+                print('Add  {:30} with p-value {:.6}'.format(best_feature,
+                      best_pval))
+
+        # backward step
+        model = sm.OLS(y, sm.add_constant(pd.DataFrame(X[included]))).fit()
+        
+        # use all coefs except intercept       
+        pvalues = model.pvalues.iloc[1:]
+        worst_pval = pvalues.max() # null if pvalues is empty
+        if worst_pval > threshold_out:
+            changed=True
+            worst_feature = pvalues.argmax()
+            included.remove(worst_feature)
+            if verbose:
+                print('Drop {:30} with p-value {:.6}'.format(worst_feature,
+                      worst_pval))
+        if not changed:
+            break
+    return included
+
+result = stepwise_selection(X, y)
+
+print('resulting features:')
+print(result)
+
+# Using just the resulting features in a model
+lm_significant = smf.ols(formula = """bwght ~ 
+                                                  birthweight['drink'] +
+                                                  birthweight['cigs'] +
+                                                  birthweight['out_mage']
+                                                  """,
+                                                  data = birthweight)
+
+# Fitting Results
+results = lm_significant.fit()
+
+# Printing Summary Statistics
+print(results.summary())
+
+"""
+    Now that we have our prospective model, lets test its performance
+    """
+
+###############################################################################
+# Testing significative variables
+###############################################################################
+
+# Testing a prediction model with most significant variables
+
+# Building training and test set    
+X = birthweight[['drink', 'cigs', 'out_mage']]
+
+y = birthweight[['bwght']]
+
+#Training the model
+X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.1, random_state=508
+        )
+
+# Initiating the Model
+lr = LinearRegression()
+
+# Fitting the model
+lr_fit = lr.fit(X_train, y_train)
+
+# Predictions
+lr_pred = lr_fit.predict(X_test)
+
+# Let's compare the testing score to the training score.
+print('Training Score', lr.score(X_train, y_train).round(4))
+
+print('Testing Score:', lr.score(X_test, y_test).round(4))
+
+print('Difference:', (lr.score(X_train, y_train) - lr.score(X_test, y_test)).
+      round(4))
+
+" Here is an acceptable model. Let's see if we can further improve it."
+
+#############
+# Test number 1: Reducing the number of variabels
+
+"""Test 1: drinks + cigs - efects of the number of drinks and cigarettes over 
+          the weight in babies"""
+          
+# Building training and test set          
+X = birthweight[['drink', 'cigs']]
+
+y = birthweight[['bwght']]
+
+# Training the model
+X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.1, random_state=508
+        )
+
+# Initiating the Model
+lr = LinearRegression()
+
+# Fitting the model
+lr_fit = lr.fit(X_train, y_train)
+
+# Predictions
+lr_pred = lr_fit.predict(X_test)
+
+# Let's compare the testing score to the training score.
+print('Training Score', lr.score(X_train, y_train).round(4))
+
+print('Testing Score:', lr.score(X_test, y_test).round(4))
+
+print('Difference:', (lr.score(X_train, y_train) - lr.score(X_test, y_test))
+      .round(4))
+
+"""
+    We were able to improve the difference between training and testing score 
+    to 5.86%, but the overall performance of the model decreased.
+    """
+
+#############
+# Test number 2: adding another variable
+
+
+# Building training and test set
+X = birthweight[['drink', 'cigs', 'out_mage', 'fage']]
+
+y = birthweight[['bwght']]
+
+# Training the model
+X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.1, random_state=508
+        )
+
+# Prepping the Model
+lr = LinearRegression()
+
+# Fitting the model
+lr_fit = lr.fit(X_train, y_train)
+
+# Predictions
+lr_pred = lr_fit.predict(X_test)
+
+# Let's compare the testing score to the training score.
+print('Training Score', lr.score(X_train, y_train).round(4))
+
+print('Testing Score:', lr.score(X_test, y_test).round(4))
+
+print('Difference:', (lr.score(X_train, y_train) - lr.score(X_test, y_test))
+      .round(4))
+
+""" 
+    Now it is better than the first model. We can see that the difference 
+    between the training and testing score went down, but the level of the 
+    scores remained high.
+    """
+
+###################
+### Final Model ###
+###################
+
+"After testing different variables we found, this is the best model: "
+
+# Building training and test set
+X = birthweight[['drink', 'cigs', 'out_mage', 'out_fage', 'out_drug']]
+
+y = birthweight[['bwght']]
+
+#Training the model
+X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.1, random_state=508
+        )
+
+# Initiating the Model
+lr = LinearRegression()
+
+# Fitting the model
+lr_fit = lr.fit(X_train, y_train)
+
+# Predictions
+lr_pred = lr_fit.predict(X_test)
+
+# Let's compare the testing score to the training score.
+print('Training Score', lr.score(X_train, y_train).round(4))
+
+print('Testing Score:', lr.score(X_test, y_test).round(4))
+
+print('Difference:', (lr.score(X_train, y_train)-lr.score(X_test, y_test))
+      .round(4))
+
+""" 
+    The lowest difference we found between the training and testing score is 
+    0.06, while the Training score of 0.73 is the highest we found.
+    """
+#################
+#Cross Validation
+cv_lr_3 = cross_val_score(lr, X, y, cv=3)
+
+print(pd.np.mean(cv_lr_3))
+    
+###################################
+## Saving the results in Excel  ###
+###################################
+    
+model_prediction = pd.DataFrame(np.column_stack((y_test, lr_pred)))
+
+model_prediction.to_excel("Predictions.xlsx")
+
+birthweight.to_excel("Team6_birthweight_Explored.xlsx")
