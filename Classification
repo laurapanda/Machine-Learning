@@ -1,0 +1,793 @@
+"""
+Created on Fri Mar 15 11:31:49 2019
+
+@author: laura schweigert
+
+Classification modeling case study
+
+Due: 03/27/19
+"""
+
+
+########################################
+### Importing Libraries and Dataset ###
+#######################################
+
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import roc_auc_score, confusion_matrix, precision_recall_curve
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn import metrics
+from sklearn.model_selection import cross_val_score
+
+
+file = 'GOT_character_predictions.xlsx'
+
+got = pd.read_excel(file)
+
+
+#################################
+### Exploratory Data Analysis ###
+#################################
+
+
+got.info() # looking at the variables
+
+got.describe().round(2) # how are they distributed
+
+got['isAlive'].value_counts()
+
+""" 
+About 3/4 of the characters are alive. More than I expected.
+But this dataset includes many side characters that are alive and have no importance.
+"""
+
+# buuut
+print(
+      got
+      .isnull()
+      .sum()
+      )
+
+""" There are so many missing values!
+    title                         1008 
+    culture                       1269 
+    dateOfBirth                   1513 
+    mother                        1925 
+    father                        1920  
+    heir                          1923 
+    house                          427 
+    spouse                        1670 
+    isAliveMother                 1925 
+    isAliveFather                 1920 
+    isAliveHeir                   1923 
+    isAliveSpouse                 1670 
+    age                           1513
+"""
+
+# renaming the columns to make them easier to refer
+got.rename(columns={'book1_A_Game_Of_Thrones':'book1',
+                    'book2_A_Clash_Of_Kings':'book2',
+                    'book3_A_Storm_Of_Swords':'book3',
+                    'book4_A_Feast_For_Crows':'book4',
+                    'book5_A_Dance_with_Dragons':'book5'}, inplace=True) 
+
+got.head() # see if it worked
+
+
+##############################################################################
+# Handling Missing Values
+##############################################################################
+
+
+"""
+Since there are so many missing values and the insights come from the ones that 
+are not missing I'm assuming, that it is appropriate to impute the median or 
+'Unknown' for missing values.
+"""
+
+# Flagging missing values
+for col in got:
+    
+    if got[col].isnull().any():
+        got['m_'+col] = got[col].isnull().astype(int)
+
+
+# Filling in a value ('Unknown') for the missing values in house
+got['house'] = got['house'].fillna('Unknown')
+got['house'].value_counts()
+
+
+# Filling in a value ('Unknown') for the missing values in title
+got['title'] = got['title'].fillna('Unknown')
+got['title'].value_counts()
+
+
+# Filling in a value ('Unknown') for the missing values in culture
+got['culture'] = got['culture'].fillna('Unknown')
+got['culture'].value_counts()
+
+
+# Filling in a the median for the birthdate
+plt.hist(got['dateOfBirth'])
+"We can see that there are two extreme and unrealistic values."
+
+got['dateOfBirth'] = got['dateOfBirth'].replace(298299,298) # https://gameofthrones.fandom.com/de/wiki/Rhaego
+got['dateOfBirth'] = got['dateOfBirth'].replace(278279,247) # https://gameofthrones.fandom.com/wiki/Doreah
+"Based on research I was able to find the real values."
+
+birthdate_med = got['dateOfBirth'].median()
+got['dateOfBirth'] = got['dateOfBirth'].fillna(birthdate_med)
+plt.hist(got['dateOfBirth'])
+
+
+# Filling in a value ('Unknown') for the missing values in mother
+got['mother'].value_counts()
+got['mother'] = got['mother'].fillna('Unknown')
+
+
+# Filling in a value ('Unknown') for the missing values in father
+got['father'].value_counts()
+got['father'] = got['father'].fillna('Unknown')
+
+
+# Filling in a value ('Unknown') for the missing values in heiritage
+got['heir'].value_counts()
+got['heir'] = got['heir'].fillna('Unknown')
+
+
+# Filling in a value ('Unknown') for the missing values in spouse
+got['spouse'].value_counts()
+got['spouse'] = got['spouse'].fillna('Unknown')
+
+
+# Filling in a value ('Unknown') for the missing values in isAliveMother
+got['isAliveMother'].value_counts()
+got['isAliveMother'] = got['isAliveMother'].fillna('0')
+
+
+# Filling in a value ('Unknown') for the missing values in isAliveFather
+got['isAliveFather'].value_counts()
+got['isAliveFather'] = got['isAliveFather'].fillna('0')
+
+
+# Filling in a value ('Unknown') for the missing values in isAliveHeir
+got['isAliveHeir'].value_counts()
+got['isAliveHeir'] = got['isAliveHeir'].fillna('0')
+
+
+# Filling in a value ('Unknown') for the missing values in isAliveSpouse
+got['isAliveSpouse'].value_counts()
+got['isAliveSpouse'] = got['isAliveSpouse'].fillna('0')
+
+
+# Filling in the median age for the missing values
+plt.hist(got['age'])
+"We can see that there are two extreme and unrealistic values (Same as dateOfBirth)."
+
+got['age'] = got['age'].replace(-298001,0) # https://gameofthrones.fandom.com/de/wiki/Rhaego
+got['age'] = got['age'].replace(-277980,25) # https://gameofthrones.fandom.com/wiki/Doreah
+"Based in research I was able to find the real values."
+
+med_age = got['age'].median()
+got['age'] = got['age'].fillna(med_age)
+
+
+# Are there any missing values left?
+print(
+      got
+      .isnull()
+      .sum()
+      .any()
+      )
+
+
+##############################################################################
+# New Variables, outlier detection and other feature treatment
+##############################################################################
+
+
+# New dataframes to look at only dead or alive characters
+got_dead = got[got['isAlive']==0]
+got_alive = got[got['isAlive']==1]
+
+
+###### Lifespan in books #######
+
+got['lifespan']= got['book1']+got['book2']+got['book3']+got['book4']+got['book5']
+  
+# Lifespan Outlier
+plt.hist(got['lifespan'])
+
+got['out_lifespan'] = got['lifespan']
+
+for row in enumerate(got.loc[: ,'out_lifespan']):
+    
+    "Flagging the observations of characters that don't appear at all (Side character)"
+    
+    if row[1] == 0  :
+        got.loc[row[0], 'out_lifespan'] = 1
+        
+    else:
+        got.loc[row[0], 'out_lifespan'] = 0
+        
+
+###### Appear in Book four or five ######  
+        
+got['book45'] = got['book4'] + got['book5']
+
+for row in enumerate(got.loc[: ,'book45']):
+    
+    "Flagging the observations of characters that don't appear at all (Side character)"
+    
+    if row[1] >= 1 :
+        got.loc[row[0], 'book45'] = 1
+        
+    else:
+        got.loc[row[0], 'book45'] = 0
+    
+got_alive = got[got['isAlive']==1]
+plt.hist(got_alive['book45'])
+got_alive['book45'].value_counts()
+" If they appear in book 4 and 5 they are more likely to be alive."    
+
+
+##### Information level (What do we know about the character?) #####
+
+got['info_level'] = 9-(got['m_title']+got['m_culture']+got['m_dateOfBirth']+got['m_mother']+got['m_father']+got['m_heir']+ got['m_house']+ got['m_spouse']+ got['m_age'])
+
+# Information level Outlier
+plt.hist(got['info_level'])
+
+"""
+Assumption: There is more information about main characters and they are more likely to die. 
+Side Characters are less likely to be dead. They still live in the story because they never appear again.
+"""
+
+got['out_info'] = got['info_level']
+
+for row in enumerate(got.loc[: ,'out_info']):
+    
+    "Flagging the observations  with a info level of more or equal to 5."
+    
+    if row[1] >= 5 :
+        got.loc[row[0], 'out_info'] = 1
+    
+    else:
+        got.loc[row[0], 'out_info'] = 0
+
+
+##### What time is it now according to birthdate and age #####
+        
+"The characters that are dead have the age when they died. So time should be a lower outlier for them. "
+
+got['time'] = got['dateOfBirth']+ got['age']
+
+plt.hist(got['time'])
+got['time'].value_counts()
+" Doesn't give much insights."
+
+got_dead = got[got['isAlive']==0]
+got_alive = got[got['isAlive']==1]
+
+plt.hist(got_dead['time'])
+plt.hist(got_alive['time'])
+got_dead['time'].value_counts()
+got_alive['time'].value_counts()
+
+"""
+All the observations with missing values became time 295.
+We can see that the characters that are alive are in the time 305 and the
+dead characters are below that time."
+"""
+
+# Time when characters are dead
+got['time_dead'] = got['time']
+
+for row in enumerate(got.loc[: ,'time_dead']):
+    
+    "Flagging the observations where time is low but values were not missing."
+    
+    if row[1] != 295:
+        if row[1] <= 304:
+            got.loc[row[0], 'time_dead'] = 1
+    
+        else:
+            got.loc[row[0], 'time_dead'] = 0
+    else:
+        got.loc[row[0], 'time_dead'] = 0
+ 
+
+# Time when characters are alive       
+got['time_alive'] = got['time']
+
+
+for row in enumerate(got.loc[: ,'time_alive']):
+    
+    "Flagging the observations where time 305."
+    
+    if row[1] == 305:
+        got.loc[row[0], 'time_alive'] = 1
+    
+    else:
+        got.loc[row[0], 'time_alive'] = 0
+
+   
+##### Popularity Outlier #####
+        
+plt.hist(got_dead['popularity'])
+plt.hist(got_alive['popularity'])
+"""
+Dead characters seem to be more likely to have a popularity between 0.3 and 0.9,
+while the characters that are still alive are either the most popular ones (Top 5) 
+or the least popular (important) ones.
+""" 
+
+
+# Popularity when they are alive 
+
+got['pop_alive']= got['popularity'] 
+
+for row in enumerate(got.loc[: ,'pop_alive']):
+    
+    "Flagging the observations of characters with a low popularity."
+    
+    if row[1] <= 0.05:
+        got.loc[row[0], 'pop_alive'] = 1
+    
+    elif row[1] >= 0.85: 
+        got.loc[row[0], 'pop_alive'] = 1
+    
+    else:
+        got.loc[row[0], 'pop_alive'] = 0
+
+
+# Popularity when they are dead      
+
+got['pop_dead']= got['popularity'] 
+
+for row in enumerate(got.loc[: ,'pop_dead']):
+    
+    "Flagging the observations of characters with a popularity between 0.3 and 0.9."
+    
+    if row[1] >= 0.012 : # 0.3
+        if row[1] < 0.9:
+            got.loc[row[0], 'pop_dead'] = 1
+
+        else:
+            got.loc[row[0], 'pop_dead'] = 0
+    else:
+        got.loc[row[0], 'pop_dead'] = 0
+
+
+##### Date of Birth outlier #####
+        
+got['out_dob'] = got['dateOfBirth']
+
+for row in enumerate(got.loc[: ,'out_dob']):
+    
+    if row[1] <= 203 :
+        got.loc[row[0], 'out_dob'] = 1
+   
+    else:
+        got.loc[row[0], 'out_dob'] = 0 
+
+# Birthdate difference dead and alive
+plt.hist(got_dead['dateOfBirth'])
+plt.hist(got_alive['dateOfBirth'])
+"Most dead people are born before 268 and most alive people are born after 268."
+
+# date of birth dead
+got['dob_dead'] = got['dateOfBirth']
+
+for row in enumerate(got.loc[: ,'dob_dead']):
+    
+    "Flagging the observations where dOB is above 268."
+    
+    if row[1] < 268 :
+        got.loc[row[0], 'dob_dead'] = 1
+    
+    else:
+        got.loc[row[0], 'dob_dead'] = 0
+
+
+# date of birth alive
+got['dob_alive'] = got['dateOfBirth']
+        
+for row in enumerate(got.loc[: ,'dob_alive']):
+    
+    "Flagging the observations where dOB is below 268."
+
+    if row[1] > 268 :
+        got.loc[row[0], 'dob_alive'] = 1
+    
+    else:
+        got.loc[row[0], 'dob_alive'] = 0
+               
+
+##### Number of Dead relations outlier #####
+        
+plt.hist(got['numDeadRelations'])
+got['numDeadRelations'].value_counts()
+
+got['out_ndr'] = got['numDeadRelations']
+
+for row in enumerate(got.loc[: ,'out_ndr']):
+    
+    "Flagging the observations that have less or equal to 3 dead relations."
+    
+    if row[1] <= 3 :
+        got.loc[row[0], 'out_ndr'] = 1
+   
+    else:
+        got.loc[row[0], 'out_ndr'] = 0
+  
+      
+##### Age outlier #####
+        
+"Some characters die because of their old age."        
+
+got['out_age'] = got['age']
+
+for row in enumerate(got.loc[: ,'out_age']):
+    
+    "Flagging observations where age is greater than 80."
+    
+    if row[1] >= 80 :
+        got.loc[row[0], 'out_age'] = 1
+    
+    else:
+        got.loc[row[0], 'out_age'] = 0 
+
+
+##### Valyrian #####
+        
+" Most people from the culture Valyrian are dead."
+
+got['Valyrian'] = got['culture']
+
+for row in enumerate(got.loc[: ,'Valyrian']):
+    
+    "Flagging the observations when a character belongs to the Valyrian culture."
+    
+    if row[1] == 'Valyrian':
+        got.loc[row[0], 'Valyrian'] = 1    
+    
+    else:
+        got.loc[row[0], 'Valyrian'] = 0
+
+
+  
+##############################################################################
+# Correlation
+##############################################################################
+
+
+df_corr = got.corr().round(2)
+df_corr['isAlive'].abs().sort_values(ascending=False)
+"""
+Top Correlations in the dataet with the specific houses and cultures.
+time_dead           0.52
+out_dob             0.34
+dateOfBirth         0.33
+time                0.31
+dob_dead            0.28
+book4               0.27
+time_alive          0.23
+book45              0.23
+Valyrian            0.21
+pop_alive           0.20
+out_age             0.20
+out_ndr             0.19
+
+The engineered features add a lot of value.
+"""
+
+
+##############################################################################
+# Exporting the explored datasets to excel files
+##############################################################################
+
+got.to_excel("GOT_explored.xlsx")
+
+##############################################################################
+# Preparing the data
+##############################################################################
+
+
+got_data = got.loc[:, ['time', 
+                        'book4', 
+                        'numDeadRelations',
+                        'popularity',
+                        'info_level',
+                        'm_dateOfBirth',
+                        'book1',
+                        'male', 
+                        'out_lifespan',
+                        'time_dead',
+                        'time_alive',
+                        'book45',
+                        'Valyrian'
+                        ]]
+
+
+got_target = got.loc[:, 'isAlive']
+  
+X_train, X_test, y_train, y_test = train_test_split(
+            got_data,
+            got_target,
+            test_size = 0.1,
+            random_state = 508,
+            stratify = got_target)
+
+
+##############################################################################
+# Gradient Boosted Machines 
+##############################################################################
+
+"""
+Gradient Boosted Machines is a ensemble learning technique in machine learning.
+The method creates many trees and improves the new trees based on what it
+learned from the previous build trees by including gradients in the loss function.
+"""
+
+
+# Initiating a weak learner gbm
+gbm = GradientBoostingClassifier(random_state = 508)
+
+# Fitting the model to the training data
+gbm_fit = gbm.fit(X_train, y_train)
+
+# Predicting
+gbm_predict = gbm_fit.predict(X_test)
+
+
+# Training and Testing Scores
+print('Training Score', gbm_fit.score(X_train, y_train).round(4))
+print('Testing Score:', gbm_fit.score(X_test, y_test).round(4))
+
+"""
+Training Score 0.8738
+Testing Score: 0.8359
+
+Right now the model is overfitting the training data. 
+We should improve it by fine-tuning the model.
+"""
+
+
+##############################################################################
+# Grid Search Cross Validation
+
+"Hyperparameter tuning improves the model fit by optimizing the parameters."
+
+# Creating a hyperparameter grid
+
+learn_space = pd.np.arange(0.1, 1.6, 0.1)
+estimator_space = pd.np.arange(50, 250, 50)
+depth_space = pd.np.arange(1, 10)
+criterion_space = ['friedman_mse', 'mse', 'mae']
+
+param_grid = {'learning_rate' : learn_space,
+              'max_depth' : depth_space,
+              'criterion' : criterion_space,
+              'n_estimators' : estimator_space
+              }
+
+
+# Building the model object one more time
+gbm_grid = GradientBoostingClassifier(random_state = 508)
+
+
+# Creating a GridSearchCV object
+gbm_grid_cv = GridSearchCV(gbm_grid, param_grid, cv = 3)
+
+
+# Fit it to the training data
+gbm_grid_cv.fit(X_train, y_train)
+
+
+# Print the optimal parameters and best score
+print("Tuned GBM Parameter:", gbm_grid_cv.best_params_)
+print("Tuned GBM Accuracy:", gbm_grid_cv.best_score_.round(4))
+
+
+
+###### Building an optimal model ##########
+
+# Initiating the optimal gbm
+gbm = GradientBoostingClassifier(loss = 'deviance',
+                                  learning_rate = 0.6,
+                                  n_estimators = 90,
+                                  max_depth = 2,
+                                  criterion = 'friedman_mse',
+                                  random_state = 508
+                                  )
+
+# Fitting the model to the training data
+gbm_fit = gbm.fit(X_train, y_train)
+
+# Predicting
+gbm_predict = gbm_fit.predict(X_test)
+
+
+# Training and Testing Scores
+print('Training Score', gbm_fit.score(X_train, y_train).round(4))
+print('Testing Score:', gbm_fit.score(X_test, y_test).round(4))
+print('Difference: ', (gbm_fit.score(X_train, y_train)-gbm_fit.score(X_test, y_test)).round(4))
+
+"""
+Training Score 0.8806
+Testing Score: 0.8769
+Difference:  0.0037 
+--> We've build a robust model that has a prediction accuracy of about 88%.
+"""
+
+
+##############################################################################
+# Plotting the feature importance
+
+
+"Let's take a look at the features, that are most important to the model."
+
+def plot_feature_importances(model, train = X_train, export = False):
+    fig, ax = plt.subplots(figsize=(12,9))
+    n_features = X_train.shape[1]
+    plt.barh(range(n_features), model.feature_importances_, align='center')
+    plt.yticks(pd.np.arange(n_features), train.columns)
+    plt.xlabel("Feature importance")
+    plt.ylabel("Feature")
+    
+    if export == True:
+        plt.savefig('Tree_Leaf_50_Feature_Importance.png')
+
+        
+plot_feature_importances(gbm_fit,
+                         train = X_train,
+                         export = False)
+
+""" 
+Wow, time_dead is a very important feature! Also, popularity and book4 
+have a relatively high feature importance.
+"""
+
+##############################################################################
+# ROC AUC Score
+
+y_pred_train = gbm_fit.predict(X_train)
+y_pred_test = gbm_fit.predict(X_test)
+
+print('Training AUC Score', roc_auc_score(y_train, y_pred_train).round(4))
+print('Testing AUC Score:', roc_auc_score(y_test, y_pred_test).round(4))
+
+
+# Run the following code to create a confusion matrix
+print(confusion_matrix(y_true = y_test,
+                       y_pred = y_pred_test))
+
+
+# Visualizing the confusion matrix
+labels = ['Dead ', 'Alive']
+
+cm = confusion_matrix(y_true = y_test,
+                      y_pred = y_pred_test)
+
+
+sns.heatmap(cm,
+            annot = True,
+            xticklabels = labels,
+            yticklabels = labels,
+            cmap = 'Blues')
+
+
+plt.xlabel('Predicted')
+plt.ylabel('Actual')
+plt.title('Confusion matrix of the classifier')
+plt.show()
+
+
+tn, fp, fn, tp = confusion_matrix(y_test, y_pred_test).ravel()
+specificity = tn / (tn+fp)
+sensitivity = tp / (tp+fn)
+precision = tp / (tp+fp)
+
+"""
+The recall/sensitivity of the model is pretty good, while the specificity 
+needs to improve. But there is a trade-off between sensitivity and specificity.
+"""
+
+
+###############################################################################
+# Cross Validation with k-folds
+###############################################################################
+
+
+# Cross Validating the model with three folds
+cv_gbm = cross_val_score(gbm,
+                         got_data,
+                         got_target,
+                         cv = 3,
+                         scoring = 'roc_auc')
+
+print('\nAverage: ',
+      pd.np.mean(cv_gbm).round(3),
+      '\n---------------'
+      '\nMinimum: ',
+      min(cv_gbm).round(3),
+      '\nMaximum: ',
+      max(cv_gbm).round(3))
+
+
+" The average cross validation score is 0.876."
+
+
+########################
+# Saving Results
+########################
+
+
+# Saving model predictions
+
+gbm_pred = gbm_fit.predict(X_test)
+
+model_predictions_df = pd.DataFrame({'Actual' : y_test,
+                                     'GBM_Predicted': gbm_pred})
+
+model_predictions_df.to_excel("Ensemble_Model_Predictions.xlsx")
+
+
+
+
+
+
+### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ###
+
+
+
+###############################################################################
+# Further Exploration
+# Probability Treshold
+###############################################################################
+
+
+# looking at different thresholds for recall and precision
+
+pred_y=gbm_fit.predict(X_test) 
+
+probs_y=gbm_fit.predict_proba(X_test) 
+
+precision, recall, thresholds = precision_recall_curve(y_test, probs_y[:, 1]) 
+
+pr_auc = metrics.auc(recall, precision)
+
+plt.title("Precision-Recall vs Threshold Chart")
+plt.plot(thresholds, precision[: -1], "b--", label="Precision")
+plt.plot(thresholds, recall[: -1], "r--", label="Recall")
+plt.ylabel("Precision, Recall")
+plt.xlabel("Threshold")
+plt.legend(loc="lower left")
+plt.ylim([0,1])
+
+"""
+In my final model, which uses a probability threshold of 0.5 by default,
+the sensitivity is very good but the specificity is rather low. 
+By moving the probability threshold I might be able to improve the AUC.
+"""
+
+
+##############################################################################
+# Probability that someone is dead or alive
+##############################################################################
+
+
+gbm_pred2 = gbm_fit.predict(got_data)
+
+model_predictions_df2 = pd.DataFrame({'Actual' : got_target,
+                                     'GBM_Predicted': gbm_pred2})
+
+proba = pd.DataFrame(gbm_fit.predict_proba(got_data))
+
+model_predictions_df2['probability'] = proba[1] # probability of being alive
